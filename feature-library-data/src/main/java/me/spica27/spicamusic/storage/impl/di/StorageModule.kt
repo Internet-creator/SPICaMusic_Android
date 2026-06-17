@@ -1,0 +1,60 @@
+package me.spica27.spicamusic.storage.impl.di
+
+import android.app.Application
+import androidx.room.Room
+import me.spica27.spicamusic.storage.api.IAlbumRepository
+import me.spica27.spicamusic.storage.api.ILyricRepository
+import me.spica27.spicamusic.storage.api.IMusicScanService
+import me.spica27.spicamusic.storage.api.IPlayHistoryRepository
+import me.spica27.spicamusic.storage.api.IPlaylistRepository
+import me.spica27.spicamusic.storage.api.IScanFolderRepository
+import me.spica27.spicamusic.storage.api.ISongRepository
+import me.spica27.spicamusic.storage.impl.db.AppDatabase
+import me.spica27.spicamusic.storage.impl.repository.AlbumRepositoryImpl
+import me.spica27.spicamusic.storage.impl.repository.LyricRepositoryImpl
+import me.spica27.spicamusic.storage.impl.repository.PlayHistoryRepositoryImpl
+import me.spica27.spicamusic.storage.impl.repository.PlaylistRepositoryImpl
+import me.spica27.spicamusic.storage.impl.repository.ScanFolderRepositoryImpl
+import me.spica27.spicamusic.storage.impl.repository.SongRepositoryImpl
+import me.spica27.spicamusic.storage.impl.scanner.MusicScanService
+import org.koin.dsl.module
+
+/**
+ * 存储模块的 Koin 依赖注入配置
+ */
+val storageModule = module {
+    // Database
+    single<AppDatabase> {
+        Room.databaseBuilder(
+            get<Application>(),
+            AppDatabase::class.java,
+            "spica_music.db",
+        ).addMigrations(
+            AppDatabase.MIGRATION_5_6,
+            AppDatabase.MIGRATION_9_10,
+            AppDatabase.MIGRATION_12_13
+        )
+            // 开发阶段允许破坏性迁移，发布时应添加正式的 Migration
+            .fallbackToDestructiveMigration(false)
+            .build()
+    }
+
+    // DAOs
+    single { get<AppDatabase>().songDao() }
+    single { get<AppDatabase>().playlistDao() }
+    single { get<AppDatabase>().lyricDao() }
+    single { get<AppDatabase>().playHistoryDao() }
+    single { get<AppDatabase>().albumDao() }
+    single { get<AppDatabase>().scanFolderDao() }
+
+    // Repositories - 通过接口暴露
+    single<ISongRepository> { SongRepositoryImpl(get()) }
+    single<IPlaylistRepository> { PlaylistRepositoryImpl(get(), get()) }
+    single<IPlayHistoryRepository> { PlayHistoryRepositoryImpl(get()) }
+    single<IAlbumRepository> { AlbumRepositoryImpl(get()) }
+    single<ILyricRepository> { LyricRepositoryImpl(get()) }
+    single<IScanFolderRepository> { ScanFolderRepositoryImpl(get()) }
+
+    // 扫描服务
+    single<IMusicScanService> { MusicScanService(get(), get(), get(), get()) }
+}

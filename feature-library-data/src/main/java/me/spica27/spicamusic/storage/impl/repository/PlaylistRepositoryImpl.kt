@@ -1,0 +1,138 @@
+package me.spica27.spicamusic.storage.impl.repository
+
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.map
+import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import me.spica27.spicamusic.common.entity.Playlist
+import me.spica27.spicamusic.common.entity.PlaylistWithSongs
+import me.spica27.spicamusic.common.entity.Song
+import me.spica27.spicamusic.storage.api.IPlaylistRepository
+import me.spica27.spicamusic.storage.impl.dao.PlaylistDao
+import me.spica27.spicamusic.storage.impl.db.AppDatabase
+import me.spica27.spicamusic.storage.impl.entity.PlaylistEntity
+import me.spica27.spicamusic.storage.impl.entity.PlaylistSongCrossRefEntity
+import me.spica27.spicamusic.storage.impl.mapper.toCommon
+
+class PlaylistRepositoryImpl(
+    private val playlistDao: PlaylistDao,
+    private val database: AppDatabase,
+) : IPlaylistRepository {
+
+    companion object {
+        private const val PAGE_SIZE = 30
+        private const val PREFETCH_DISTANCE = 10
+    }
+
+    override fun getAllPlaylistsPagingFlow(): Flow<PagingData<Playlist>> = Pager(
+        config = PagingConfig(
+            pageSize = PAGE_SIZE,
+            prefetchDistance = PREFETCH_DISTANCE,
+            enablePlaceholders = false,
+        ),
+        pagingSourceFactory = { playlistDao.getAllPaging() }
+    ).flow.map { pagingData ->
+        pagingData.map { it.toCommon() }
+    }
+
+    override fun searchSongsByPlaylistId(playlistId: Long, keyword: String): Flow<List<Song>> =
+        playlistDao.searchSongsByPlaylistId(playlistId, keyword)
+            .map { list -> list.map { it.toCommon() } }
+            .flowOn(Dispatchers.IO)
+
+    override fun getSongsByPlaylistIdFlow(
+        playlistId: Long,
+        keyword: String
+    ): Flow<PagingData<Song>> = Pager(
+        config = PagingConfig(
+            pageSize = PAGE_SIZE,
+            prefetchDistance = PREFETCH_DISTANCE,
+            enablePlaceholders = false,
+        ),
+        pagingSourceFactory = { playlistDao.getSongsPagingByPlaylistId(playlistId, keyword) }
+    ).flow.map { pagingData ->
+        pagingData.map { it.toCommon() }
+    }.flowOn(Dispatchers.IO)
+
+    override fun getPlaylistByIdFlow(playlistId: Long): Flow<Playlist?> =
+        playlistDao.getPlayListByIdFlow(playlistId).map { it?.toCommon() }
+
+    override fun getAllPlaylistsFlow(): Flow<List<Playlist>> =
+        playlistDao.getAllPlaylist().map { list -> list.map { it.toCommon() } }
+
+    override fun getPlaylistsHavingSong(mediaId: Long): Flow<List<Playlist>> =
+        playlistDao.getPlaylistsHaveSong(mediaId).map { list -> list.map { it.toCommon() } }
+
+    override fun getPlaylistsNotHavingSong(mediaId: Long): Flow<List<Playlist>> =
+        playlistDao.getPlaylistsNotHavingSong(mediaId).map { list -> list.map { it.toCommon() } }
+
+    override fun getPlaylistWithSongsFlow(playlistId: Long): Flow<PlaylistWithSongs?> =
+        playlistDao.getPlaylistsWithSongsWithPlayListIdFlow(playlistId)
+            .flowOn(Dispatchers.IO)
+            .distinctUntilChanged()
+            .map { it?.toCommon() }
+
+    override suspend fun incrementPlaylistPlayTime(playlistId: Long) = withContext(Dispatchers.IO) {
+        playlistDao.addPlayTimes(playlistId)
+    }
+
+    override suspend fun createPlaylist(name: String): Long = withContext(Dispatchers.IO) {
+        playlistDao.insertPlaylistAndGetId(PlaylistEntity(playlistName = name))
+    }
+
+    override suspend fun deletePlaylist(id: Long) = withContext(Dispatchers.IO) {
+        playlistDao.deleteById(id)
+    }
+
+    override suspend fun renamePlaylist(playlistId: Long, newName: String) =
+        withContext(Dispatchers.IO) {
+            playlistDao.renamePlaylist(playlistId, newName)
+        }
+
+    override suspend fun addSongToPlaylist(playlistId: Long, mediaId: Long) =
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                playlistDao.insertListItem(PlaylistSongCrossRefEntity(playlistId, mediaId))
+                playlistDao.setNeedUpdate(playlistId)
+            }
+        }
+
+    override suspend fun removeSongFromPlaylist(playlistId: Long, mediaId: Long) =
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                playlistDao.deleteListItem(PlaylistSongCrossRefEntity(playlistId, mediaId))
+                playlistDao.setNeedUpdate(playlistId)
+            }
+        }
+
+    override suspend fun addSongsToPlaylist(playlistId: Long, mediaIds: List<Long>) =
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                playlistDao.insertListItems(mediaIds.map {
+                    PlaylistSongCrossRefEntity(
+                        playlistId,
+                        it
+                    )
+                })
+                playlistDao.setNeedUpdate(playlistId)
+            }
+        }
+
+    override fun getPlaylistCoverAlbumIds(playlistId: Long): Flow<List<Long>> =
+        playlistDao.getCoverAlbumIds(playlistId)
+
+    override fun getSongSizeInPlaylist(playlistId: Long): Flow<Int> {
+        return playlistDao.getSongSizeByPlaylistId(playlistId)
+    }
+
+    override fun getMediaIdsInPlaylist(playlistId: Long):List<Long> {
+        return playlistDao.getMediaIdsByPlaylistId(playlistId)
+    }
+}
